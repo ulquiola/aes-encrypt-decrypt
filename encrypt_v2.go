@@ -13,6 +13,7 @@ import (
 )
 
 const defaultKey = "your_32_byte_key_here_pass@word_" // 32字节密钥
+const encryptionMarker = "ENCRYPTED" // 加密标识符
 
 func encryptFile(src, dst string, key []byte) error {
 	log.Printf("正在加密文件: %s → %s", src, dst)
@@ -31,6 +32,11 @@ func encryptFile(src, dst string, key []byte) error {
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
+		return err
+	}
+
+	// 写入加密标识符
+	if _, err := dstFile.Write([]byte(encryptionMarker)); err != nil {
 		return err
 	}
 
@@ -78,6 +84,16 @@ func decryptFile(src, dst string, key []byte) error {
 		return err
 	}
 
+	// 读取并验证加密标识符
+	marker := make([]byte, len(encryptionMarker))
+	if _, err := io.ReadFull(srcFile, marker); err != nil {
+		return err
+	}
+	if string(marker) != encryptionMarker {
+		log.Printf("文件未加密，跳过: %s", src)
+		return nil
+	}
+
 	// 读取IV
 	iv := make([]byte, block.BlockSize())
 	if _, err := io.ReadFull(srcFile, iv); err != nil {
@@ -95,6 +111,20 @@ func decryptFile(src, dst string, key []byte) error {
 
 	log.Printf("解密成功: %s", dst)
 	return nil
+}
+
+func isFileEncrypted(filepath string) bool {
+    file, err := os.Open(filepath)
+    if err != nil {
+        return false
+    }
+    defer file.Close()
+
+    marker := make([]byte, len(encryptionMarker))
+    if _, err := io.ReadFull(file, marker); err != nil {
+        return false
+    }
+    return string(marker) == encryptionMarker
 }
 
 func main() {
@@ -160,6 +190,13 @@ func main() {
 			}
 
 			targetFile := filepath.Join(targetDir, relPath)
+			// 添加检查逻辑
+			if _, err := os.Stat(targetFile); err == nil {
+				if isFileEncrypted(targetFile) {
+					log.Printf("文件已加密，跳过: %s", targetFile)
+					return nil
+				}
+			}
 			if err := encryptFile(path, targetFile, key); err != nil {
 				log.Printf("加密文件 %s 失败: %v", path, err)
 				return err
